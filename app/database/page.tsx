@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Check, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Plus, Trash2, Search, AlertTriangle, X } from "lucide-react";
 import DashboardSidebar from "@/components/DashboardSidebar";
 import {
   SidebarProvider,
@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Tables } from "@/services/supabasaTypes";
 import supabase from "@/services/supabase";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -22,10 +22,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AhoCorasick } from '@/lib/aho-corasick';
+import { DuplicateDetector } from '@/lib/duplicate-detector';
 
 type PersonalTransaction = Tables<"personal_tx">;
 type CompanyTransaction = Tables<"company_tx">;
 type Transaction = PersonalTransaction | CompanyTransaction;
+
+interface AnalysisResult {
+  type: 'patterns' | 'duplicates';
+  count: number;
+  time: number;
+  details?: any[];
+}
 
 export default function DatabasePage() {
   const [userType, setUserType] = useState<"personal" | "company">("personal");
@@ -37,16 +46,20 @@ export default function DatabasePage() {
   const [categoryFilter, setCategoryFilter] = useState<string[]>([]);
   const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
   const [categories, setCategories] = useState<string[]>([]);
+  const [duplicates, setDuplicates] = useState<any[]>([]);
+  const [patternMatches, setPatternMatches] = useState<Map<number, string[]>>(new Map());
+  const [analysisTime, setAnalysisTime] = useState<number>(0);
+  const [showAnalysisPopup, setShowAnalysisPopup] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   
-  // Form state
   const [isAddingTransaction, setIsAddingTransaction] = useState(false);
   const [newTransaction, setNewTransaction] = useState({
     tipo: "gasto" as "ingreso" | "gasto",
     monto: "",
     fecha: new Date().toISOString().split('T')[0],
     categoria: "",
-    descripcion: "", // para personal
-    concepto: "", // para company
+    descripcion: "",
+    concepto: "",
   });
 
   useEffect(() => {
@@ -177,9 +190,94 @@ export default function DatabasePage() {
     if (sortOrder === "desc") {
       return dateB - dateA; // Más recientes primero
     } else {
-      return dateA - dateB; // Más antiguos primero
+      return dateA - dateB;
     }
   });
+
+  const detectDuplicates = async () => {
+    const startTime = performance.now();
+    
+    try {
+      const detector = new DuplicateDetector({
+        textSimilarityThreshold: 0.85,
+        amountTolerancePercent: 0.02,
+        dateDifferenceMaxDays: 3
+      });
+
+      const txWithText = transactions.map(tx => ({
+        id: tx.id,
+        descripcion: (tx as any).descripcion || (tx as any).concepto,
+        monto: tx.monto,
+        fecha: tx.fecha,
+        categoria: tx.categoria || undefined,
+        tipo: tx.tipo
+      }));
+
+      const found = detector.detectDuplicates(txWithText);
+      setDuplicates(found);
+      
+      const endTime = performance.now();
+      setAnalysisTime(endTime - startTime);
+      
+      setAnalysisResult({
+        type: 'duplicates',
+        count: found.length,
+        time: endTime - startTime,
+        details: found
+      });
+      setShowAnalysisPopup(true);
+    } catch (err) {
+      console.error('Error detecting duplicates:', err);
+      alert('Error al detectar duplicados');
+    }
+  };
+
+  const searchPatterns = async () => {
+    const startTime = performance.now();
+    
+    try {
+      const patterns = [
+        'netflix', 'spotify', 'uber', 'amazon', 'mercadolibre',
+        'rappi', 'starbucks', 'oxxo', 'walmart', 'liverpool',
+        'telefonica', 'telmex', 'cfe', 'agua', 'gas'
+      ];
+
+      const ac = new AhoCorasick();
+      ac.addPatterns(patterns);
+      ac.build();
+
+      const matches = new Map<number, string[]>();
+      const matchedTransactions: any[] = [];
+      
+      transactions.forEach(tx => {
+        const text = ((tx as any).descripcion || (tx as any).concepto || '').toLowerCase();
+        const found = ac.getMatchedPatterns(text);
+        if (found.length > 0) {
+          matches.set(tx.id, found);
+          matchedTransactions.push({
+            transaction: tx,
+            patterns: found
+          });
+        }
+      });
+
+      setPatternMatches(matches);
+
+      const endTime = performance.now();
+      setAnalysisTime(endTime - startTime);
+      
+      setAnalysisResult({
+        type: 'patterns',
+        count: matches.size,
+        time: endTime - startTime,
+        details: matchedTransactions
+      });
+      setShowAnalysisPopup(true);
+    } catch (err) {
+      console.error('Error searching patterns:', err);
+      alert('Error al buscar patrones');
+    }
+  };
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("es-MX", {
@@ -352,7 +450,6 @@ export default function DatabasePage() {
                 </div>
               </Card>
 
-              {/* Filters Section - Fixed */}
               <Card className="mb-4">
                 <div className="p-4 bg-white">
                   <div className="flex flex-wrap gap-4 items-center">
@@ -415,6 +512,25 @@ export default function DatabasePage() {
                           <SelectItem value="asc">Más antiguos</SelectItem>
                         </SelectContent>
                       </Select>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button 
+                        onClick={searchPatterns} 
+                        variant="secondary"
+                        size="sm"
+                      >
+                        <Search className="h-4 w-4 mr-2" />
+                        Buscar Patrones
+                      </Button>
+                      <Button 
+                        onClick={detectDuplicates} 
+                        variant="secondary"
+                        size="sm"
+                      >
+                        <AlertTriangle className="h-4 w-4 mr-2" />
+                        Detectar Duplicados
+                      </Button>
                     </div>
 
                     <div className="w-full flex gap-2 flex-wrap mt-2">
@@ -488,6 +604,24 @@ export default function DatabasePage() {
                                 {userType === "company" ? tx.concepto : tx.descripcion || "Sin descripción"}
                               </p>
                               <p className="text-sm text-gray-500">{formatDate(tx.fecha)}</p>
+                              
+                              {patternMatches.has(tx.id) && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {patternMatches.get(tx.id)?.map((pattern, i) => (
+                                    <Badge key={i} variant="secondary" className="text-xs">
+                                      🔍 {pattern}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+                              
+                              {duplicates.some(dup => 
+                                dup.transaction1.id === tx.id || dup.transaction2.id === tx.id
+                              ) && (
+                                <Badge variant="destructive" className="text-xs mt-1">
+                                  ⚠️ Posible duplicado
+                                </Badge>
+                              )}
                             </div>
                             <div className="flex items-center gap-3">
                               <div className={`text-lg font-bold ${
@@ -516,6 +650,108 @@ export default function DatabasePage() {
           </div>
         </SidebarInset>
       </div>
+
+      {showAnalysisPopup && analysisResult && (
+        <div className="fixed inset-0 bg-white bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <Card className="max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-2xl border-2">
+            <CardHeader className="border-b">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    {analysisResult.type === 'patterns' ? (
+                      <>
+                        <Search className="h-5 w-5 text-blue-600" />
+                        Patrones Encontrados
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle className="h-5 w-5 text-orange-600" />
+                        Duplicados Detectados
+                      </>
+                    )}
+                  </CardTitle>
+                  <CardDescription className="mt-2">
+                    Se encontraron {analysisResult.count} {analysisResult.type === 'patterns' ? 'transacciones con patrones' : 'posibles duplicados'} en {analysisResult.time.toFixed(2)}ms
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowAnalysisPopup(false)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-6 overflow-y-auto max-h-[60vh]">
+              {analysisResult.type === 'patterns' ? (
+                <div className="space-y-4">
+                  {analysisResult.details?.map((item: any, idx: number) => (
+                    <div key={idx} className="bg-gray-50 p-4 rounded-lg border">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex-1">
+                          <p className="font-semibold text-gray-900">
+                            {(item.transaction as any).descripcion || (item.transaction as any).concepto}
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            {formatCurrency(item.transaction.monto)} • {formatDate(item.transaction.fecha)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {item.patterns.map((pattern: string, i: number) => (
+                          <Badge key={i} variant="secondary" className="text-xs">
+                            🔍 {pattern}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {analysisResult.details?.slice(0, 10).map((dup: any, idx: number) => (
+                    <div key={idx} className="bg-orange-50 p-4 rounded-lg border border-orange-200">
+                      <div className="flex justify-between items-start mb-2">
+                        <Badge variant={dup.confidence === 'high' ? 'destructive' : 'secondary'}>
+                          Confianza: {dup.confidence === 'high' ? 'Alta' : dup.confidence === 'medium' ? 'Media' : 'Baja'}
+                        </Badge>
+                        <span className="text-sm text-gray-600">
+                          Similitud: {(dup.similarity * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4 text-sm mt-3">
+                        <div className="bg-white p-3 rounded">
+                          <p className="font-semibold">{dup.transaction1.descripcion}</p>
+                          <p className="text-gray-600">{formatCurrency(dup.transaction1.monto)}</p>
+                          <p className="text-xs text-gray-500">{formatDate(dup.transaction1.fecha)}</p>
+                        </div>
+                        <div className="bg-white p-3 rounded">
+                          <p className="font-semibold">{dup.transaction2.descripcion}</p>
+                          <p className="text-gray-600">{formatCurrency(dup.transaction2.monto)}</p>
+                          <p className="text-xs text-gray-500">{formatDate(dup.transaction2.fecha)}</p>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {dup.reasons.map((reason: string, i: number) => (
+                          <Badge key={i} variant="outline" className="text-xs">
+                            {reason}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {analysisResult.details && analysisResult.details.length > 10 && (
+                    <p className="text-center text-sm text-gray-500">
+                      Mostrando 10 de {analysisResult.details.length} duplicados encontrados
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </SidebarProvider>
   );
 }

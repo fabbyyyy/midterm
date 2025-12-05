@@ -203,6 +203,29 @@ const results = await processor.process(transactions, analyzeFn);
 - ✅ Gráficas y Tablas (Recharts)
 - ✅ Ejemplos con Transacciones Reales
 
+## 👥 Equipo y contribuciones
+
+- **Fabián Garza**
+  - Diseño general de la arquitectura de benchmarking del sistema.
+  - Implementación del módulo que mide tiempos de Supabase y compara contra versiones optimizadas (módulo de benchmarking y comparación teórica vs real).
+  - Desarrollo de la aplicación web (páginas de benchmarks, dashboard y flujo principal de navegación).
+
+- **Manuel Antonio Pérez**
+  - Implementación del algoritmo Aho-Corasick para búsqueda multi-patrón en descripciones de transacciones.
+  - Diseño de casos de prueba de patrones y textos para validar el comportamiento del automáta.
+  - Desarrollo de partes de la aplicación web (componentes y flujos de benchmark) en conjunto con Fabián y Josué.
+
+- **Ignacio Osuna**
+  - Diseño e implementación de la paralelización del procesamiento de transacciones (módulo de procesamiento en paralelo, división en chunks y uso de `Promise.all`).
+  - Integración de la capa paralela con el servicio de benchmarks para reducir el tiempo total en cargas grandes.
+  - Apoyo en el análisis de escalabilidad y en la interpretación de resultados de rendimiento.
+
+- **Josué Santiago Aguiñaga**
+  - Diseño e implementación de la visualización de resultados con Recharts (gráficas de barras, área y pastel, y tablas de métricas).
+  - Integración de las métricas de rendimiento en la UI de la aplicación web junto con Fabián y Manuel.
+  - Ajustes de diseño y pulido visual de los dashboards utilizados en el póster y en la demo del proyecto.
+
+
 ## 🔧 Tecnologías
 
 - Next.js 16, React 19, TypeScript 5
